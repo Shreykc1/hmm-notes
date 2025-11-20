@@ -3,56 +3,73 @@
 /**
  * QR Scan Page (Phone side)
  * Scans QR code from PC and authenticates with WebAuthn
+ * Also works as standalone biometric unlock page
  */
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { authenticateCredential, serializeAssertion } from '@/lib/webauthn';
 import { base64urlDecode } from '@/lib/crypto';
 
 
 function ScanContent() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const [status, setStatus] = useState<'ready' | 'authenticating' | 'success' | 'error'>('ready');
     const [error, setError] = useState('');
     const sessionId = searchParams!.get('session');
     const challenge = searchParams!.get('challenge');
+    const isQRMode = !!sessionId && !!challenge;
 
     useEffect(() => {
+        // If not in QR mode, this is just a biometric unlock page
+        if (!isQRMode) {
+            return;
+        }
+
+        // QR mode validation
         if (!sessionId || !challenge) {
             setError('Invalid QR code. Missing session or challenge.');
             setStatus('error');
         }
-    }, [sessionId, challenge]);
+    }, [sessionId, challenge, isQRMode]);
 
-    const handleAuthenticate = async () => {
-        if (!sessionId || !challenge) return;
-
+    const handleBiometricUnlock = async () => {
         setStatus('authenticating');
         setError('');
 
         try {
-            // Decode challenge
-            const challengeBytes = base64urlDecode(challenge);
+            if (isQRMode) {
+                // QR Mode: Send assertion to relay server
+                const challengeBytes = base64urlDecode(challenge!);
+                const assertion = await authenticateCredential(challengeBytes);
 
-            // Authenticate with WebAuthn
-            const assertion = await authenticateCredential(challengeBytes);
+                const response = await fetch(`/api/session/${sessionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        assertion: JSON.stringify(assertion),
+                    }),
+                });
 
+                if (!response.ok) {
+                    throw new Error('Failed to send assertion');
+                }
 
-            // Send assertion to relay server
-            const response = await fetch(`/api/session/${sessionId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    assertion: JSON.stringify(assertion),
-                }),
-            });
+                setStatus('success');
+            } else {
+                // Standalone Mode: Unlock and redirect to main app
+                // Just verify that WebAuthn works, then redirect
+                const challengeBytes = crypto.getRandomValues(new Uint8Array(32));
+                await authenticateCredential(challengeBytes);
 
-            if (!response.ok) {
-                throw new Error('Failed to send assertion');
+                setStatus('success');
+
+                // Redirect to main app after 1 second
+                setTimeout(() => {
+                    router.push('/');
+                }, 1000);
             }
-
-            setStatus('success');
         } catch (err) {
             console.error('Authentication error:', err);
             setError(err instanceof Error ? err.message : 'Authentication failed');
@@ -64,17 +81,19 @@ function ScanContent() {
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-8">
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
-                    🔓 Unlock Your PC
+                    {isQRMode ? '🔓 Unlock Your PC' : '🔐 Biometric Unlock'}
                 </h2>
 
                 {status === 'ready' && (
                     <div className="text-center">
                         <p className="text-gray-600 dark:text-gray-400 mb-6">
-                            Authenticate with your biometric (Face ID, Touch ID, or fingerprint)
-                            to unlock your PC
+                            {isQRMode
+                                ? 'Authenticate with your biometric (Face ID, Touch ID, or fingerprint) to unlock your PC'
+                                : 'Use your biometric (Face ID, Touch ID, or fingerprint) to unlock your notes'
+                            }
                         </p>
                         <button
-                            onClick={handleAuthenticate}
+                            onClick={handleBiometricUnlock}
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-md transition-colors"
                         >
                             🔐 Authenticate
@@ -98,7 +117,10 @@ function ScanContent() {
                             Authentication Successful!
                         </p>
                         <p className="text-gray-600 dark:text-gray-400">
-                            Your PC should now unlock. You can close this window.
+                            {isQRMode
+                                ? 'Your PC should now unlock. You can close this window.'
+                                : 'Redirecting to your notes...'
+                            }
                         </p>
                     </div>
                 )}
