@@ -15,8 +15,8 @@ function ScanContent() {
     const searchParams = useSearchParams();
     const [status, setStatus] = useState<'ready' | 'authenticating' | 'success' | 'error'>('ready');
     const [error, setError] = useState('');
-    const sessionId = searchParams.get('session') ?? '';
-    const challenge = searchParams.get('challenge') ?? '';
+    const sessionId = searchParams!.get('session');
+    const challenge = searchParams!.get('challenge');
 
     useEffect(() => {
         if (!sessionId || !challenge) {
