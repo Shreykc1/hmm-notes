@@ -236,18 +236,23 @@ export async function exportBackup(): Promise<BackupData> {
  * Validate a backup before importing
  * Checks schema and master key compatibility
  */
-export async function validateBackup(data: unknown): Promise<{ valid: boolean; reason?: string }> {
+export async function validateBackup(data: unknown): Promise<{
+    valid: boolean;
+    reason?: string;
+    code?: 'VERSION_MISMATCH' | 'KEY_MISMATCH' | 'INVALID_FORMAT';
+    backupMasterKeyData?: MasterKeyData; // Return this so UI can use it for unlocking
+}> {
     // 1. Validate schema
     const result = BackupDataSchema.safeParse(data);
     if (!result.success) {
-        return { valid: false, reason: 'Invalid backup file format' };
+        return { valid: false, reason: 'Invalid backup file format', code: 'INVALID_FORMAT' };
     }
 
     const backup = result.data;
 
     // 2. Check version
     if (backup.version !== 1) {
-        return { valid: false, reason: `Unsupported backup version: ${backup.version}` };
+        return { valid: false, reason: `Unsupported backup version: ${backup.version}`, code: 'VERSION_MISMATCH' };
     }
 
     // 3. Check master key compatibility
@@ -261,7 +266,9 @@ export async function validateBackup(data: unknown): Promise<{ valid: boolean; r
         if (currentKeyData.salt !== backup.masterKeyData.salt) {
             return {
                 valid: false,
-                reason: 'Keystore mismatch: This backup was created with a different master key/password and cannot be merged.'
+                reason: 'Keystore mismatch: This backup was created with a different master key/password.',
+                code: 'KEY_MISMATCH',
+                backupMasterKeyData: backup.masterKeyData
             };
         }
     }
@@ -288,8 +295,9 @@ export async function importBackup(
 
     const db = await initDB();
 
-    // Import master key data (if present)
-    if (validated.masterKeyData) {
+    // Import master key data (if present and NOT merging, or if explicitly forced)
+    // If merging, we generally want to keep the current master key unless we are doing a full restore
+    if (validated.masterKeyData && !mergeNotes) {
         await saveMasterKeyData(validated.masterKeyData);
     }
 

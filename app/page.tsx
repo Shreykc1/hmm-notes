@@ -7,8 +7,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { isSetup, getAllNotes, deleteNote, exportBackup, importBackup, getStats, validateBackup } from '@/lib/indexeddb';
-import { decryptText } from '@/lib/crypto';
+import { isSetup, getAllNotes, deleteNote, exportBackup, importBackup, getStats, validateBackup, type MasterKeyData } from '@/lib/indexeddb';
+import { decryptText, encryptText } from '@/lib/crypto';
 import type { Note } from '@/lib/indexeddb';
 import UnlockModal from '@/components/UnlockModal';
 import NoteEditor from '@/components/NoteEditor';
@@ -23,6 +23,10 @@ export default function Home() {
   const [showQR, setShowQR] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hasWebAuthn, setHasWebAuthn] = useState(false);
+
+  // For cross-device import
+  const [showBackupUnlock, setShowBackupUnlock] = useState(false);
+  const [pendingBackupData, setPendingBackupData] = useState<{ data: any, masterKeyData: MasterKeyData } | null>(null);
 
   useEffect(() => {
     checkSetup();
@@ -114,7 +118,18 @@ export default function Home() {
         }
 
         const validation = await validateBackup(data);
+
         if (!validation.valid) {
+          if (validation.code === 'KEY_MISMATCH' && validation.backupMasterKeyData) {
+            // Prompt for backup password
+            setPendingBackupData({
+              data,
+              masterKeyData: validation.backupMasterKeyData
+            });
+            setShowBackupUnlock(true);
+            return;
+          }
+
           alert(`Import failed: ${validation.reason}`);
           return;
         }
@@ -128,6 +143,64 @@ export default function Home() {
       }
     };
     input.click();
+  };
+
+  const handleBackupUnlock = async (backupKey: CryptoKey) => {
+    if (!pendingBackupData || !masterKey) return;
+
+    try {
+      setLoading(true);
+      const { data } = pendingBackupData;
+
+      // 1. Decrypt all notes in the backup using the backupKey
+      const reEncryptedNotes: Note[] = [];
+
+      for (const note of data.notes) {
+        try {
+          // Decrypt with OLD key
+          const plaintext = await decryptText(note.ciphertext, note.iv, backupKey);
+
+          // Encrypt with NEW (current) key
+          const { ciphertext, iv } = await encryptText(plaintext, masterKey);
+
+          reEncryptedNotes.push({
+            ...note,
+            ciphertext,
+            iv,
+            // Keep original timestamps and ID
+          });
+        } catch (e) {
+          console.error(`Failed to re-encrypt note ${note.id}:`, e);
+          // Skip notes that fail to decrypt (maybe corrupted?)
+        }
+      }
+
+      // 2. Create a new backup object with the re-encrypted notes
+      // We keep the structure but replace notes with our re-encrypted ones
+      // We also strip the masterKeyData since we are merging into CURRENT key
+      const mergedBackup = {
+        ...data,
+        notes: reEncryptedNotes,
+        // We don't need to pass masterKeyData because we've already re-keyed the notes
+        // to match the CURRENT master key.
+        // However, importBackup expects it to validate schema. 
+        // But since we are merging, importBackup ignores masterKeyData if we pass merge=true.
+        // Let's just keep it as is, importBackup will validate it but we won't use it.
+      };
+
+      // 3. Import
+      await importBackup(mergedBackup, true);
+      await loadNotes();
+
+      setShowBackupUnlock(false);
+      setPendingBackupData(null);
+      alert(`Successfully imported ${reEncryptedNotes.length} notes from backup!`);
+    } catch (error) {
+      console.error('Re-encryption import error:', error);
+      alert('Failed to import backup: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -162,6 +235,14 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+      {showBackupUnlock && pendingBackupData && (
+        <UnlockModal
+          onUnlock={handleBackupUnlock}
+          customMasterKeyData={pendingBackupData.masterKeyData}
+          title="Unlock Backup"
+          description="This backup is from a different account. Enter its password to import."
+        />
+      )}
       <SessionTimer
         timeout={5 * 60 * 1000} // 5 minutes
         onTimeout={handleLock}

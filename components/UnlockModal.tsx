@@ -15,7 +15,7 @@ interface UnlockModalProps {
     hasWebAuthn?: boolean;
 }
 
-export default function UnlockModal({ onUnlock, onShowQR, hasWebAuthn }: UnlockModalProps) {
+export default function UnlockModal({ onUnlock, onShowQR, hasWebAuthn, customMasterKeyData, title, description }: UnlockModalProps & { customMasterKeyData?: any, title?: string, description?: string }) {
     const [passphrase, setPassphrase] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -26,8 +26,8 @@ export default function UnlockModal({ onUnlock, onShowQR, hasWebAuthn }: UnlockM
         setLoading(true);
 
         try {
-            // Get master key data from IndexedDB
-            const masterKeyData = await getMasterKeyData();
+            // Get master key data from IndexedDB OR use custom data
+            const masterKeyData = customMasterKeyData || await getMasterKeyData();
             if (!masterKeyData) {
                 throw new Error('No master key found. Please set up the app first.');
             }
@@ -80,8 +80,13 @@ export default function UnlockModal({ onUnlock, onShowQR, hasWebAuthn }: UnlockM
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
                 <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">
-                    Unlock Secure Notes
+                    {title || 'Unlock Secure Notes'}
                 </h2>
+                {description && (
+                    <p className="mb-4 text-gray-600 dark:text-gray-400">
+                        {description}
+                    </p>
+                )}
 
                 <form onSubmit={handlePassphraseUnlock} className="space-y-4">
                     <div>
