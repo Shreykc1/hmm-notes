@@ -233,6 +233,43 @@ export async function exportBackup(): Promise<BackupData> {
 }
 
 /**
+ * Validate a backup before importing
+ * Checks schema and master key compatibility
+ */
+export async function validateBackup(data: unknown): Promise<{ valid: boolean; reason?: string }> {
+    // 1. Validate schema
+    const result = BackupDataSchema.safeParse(data);
+    if (!result.success) {
+        return { valid: false, reason: 'Invalid backup file format' };
+    }
+
+    const backup = result.data;
+
+    // 2. Check version
+    if (backup.version !== 1) {
+        return { valid: false, reason: `Unsupported backup version: ${backup.version}` };
+    }
+
+    // 3. Check master key compatibility
+    // If we have a current master key, the backup must match it to be readable
+    const currentKeyData = await getMasterKeyData();
+
+    if (currentKeyData && backup.masterKeyData) {
+        // We can check if the salt/iv/iterations match as a proxy for "same key derivation params"
+        // Ideally we'd check a key checksum, but checking the salt is a good first step
+        // If salts differ, it's definitely a different key setup
+        if (currentKeyData.salt !== backup.masterKeyData.salt) {
+            return {
+                valid: false,
+                reason: 'Keystore mismatch: This backup was created with a different master key/password and cannot be merged.'
+            };
+        }
+    }
+
+    return { valid: true };
+}
+
+/**
  * Import data from a backup
  * SECURITY: Validates structure before importing; does not decrypt
  * @param data - Backup data (parsed JSON)

@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { isSetup, getAllNotes, deleteNote, exportBackup, importBackup, getStats } from '@/lib/indexeddb';
+import { isSetup, getAllNotes, deleteNote, exportBackup, importBackup, getStats, validateBackup } from '@/lib/indexeddb';
 import { decryptText } from '@/lib/crypto';
 import type { Note } from '@/lib/indexeddb';
 import UnlockModal from '@/components/UnlockModal';
@@ -105,7 +105,20 @@ export default function Home() {
 
       try {
         const text = await file.text();
-        const data = JSON.parse(text);
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          alert('Invalid JSON file');
+          return;
+        }
+
+        const validation = await validateBackup(data);
+        if (!validation.valid) {
+          alert(`Import failed: ${validation.reason}`);
+          return;
+        }
+
         await importBackup(data, true); // Merge with existing
         await loadNotes();
         alert('Backup imported successfully!');
