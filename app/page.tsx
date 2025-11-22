@@ -280,7 +280,7 @@ export default function Home() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar - Notes List */}
-        <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
+        <div className={`${showEditor ? 'hidden md:block' : 'block'} w-full md:w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto`}>
           <div className="p-4">
             <button
               onClick={handleNewNote}
@@ -310,7 +310,7 @@ export default function Home() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 overflow-hidden">
+        <div className={`${showEditor ? 'block' : 'hidden md:block'} flex-1 overflow-hidden`}>
           {showEditor ? (
             <NoteEditor
               note={selectedNote}
